@@ -1,0 +1,215 @@
+rules_version = '2';
+service cloud.firestore {
+ match /databases/{database}/documents {
+  // Kinship: email/password and Google use the same Firebase user ID checks.
+  // Publish this entire file in Cloud Firestore > Rules, then click Publish.
+  // Family setup creates the family, owner membership, invite and profile link
+  // atomically. getAfter() validates those documents inside the same batch.
+  function signed() {
+   return request.auth != null;
+  }
+  function mine(uid) { return signed() && request.auth.uid == uid; }
+  function member(fid) {
+   return signed()
+    && exists(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid))
+    && get(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid)).data.status == 'active';
+  }
+  function adult(fid) {
+   return member(fid) && get(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid)).data.role == 'adult';
+  }
+  function adultAfter(fid) {
+   let membership = getAfter(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid));
+   return signed() && membership.data.role == 'adult' && membership.data.status == 'active';
+  }
+  function newOwner(fid,uid) {
+   return mine(uid)
+    && !exists(/databases/$(database)/documents/families/$(fid))
+    && getAfter(/databases/$(database)/documents/families/$(fid)).data.ownerId == uid;
+  }
+  function date(v) { return v is string && v.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$'); }
+  function color(v) { return v is string && v.matches('^#[0-9a-fA-F]{6}$'); }
+  function title(v,n) { return v is string && v.size() > 0 && v.size() <= n; }
+  function validBirthDate(b) {
+   return b is timestamp && b == b.date()
+    && b >= timestamp.date(1900,1,1) && b <= request.time.date();
+  }
+  function ageRole(uid) {
+   let b = getAfter(/databases/$(database)/documents/users/$(uid)).data.get('birthDate',null);
+   return validBirthDate(b) ? ((request.time.year() - b.year()
+    - ((request.time.month() < b.month() || (request.time.month() == b.month() && request.time.day() < b.day())) ? 1 : 0)) >= 18 ? 'adult' : 'child') : 'unset';
+  }
+  function validProfileData(d) {
+   return title(d.name,50)
+    && (d.familyId == null || d.familyId is string) && d.createdAt is timestamp
+    && (!('birthDate' in d) || validBirthDate(d.birthDate));
+  }
+  function validProfile(d) {
+   return d.keys().hasOnly(['name','familyId','createdAt','birthDate']) && validProfileData(d);
+  }
+  function validFamily(d) {
+   return d.keys().hasOnly(['name','ownerId','inviteCode','timezone','createdAt'])
+    && title(d.name,60) && d.ownerId is string
+    && d.inviteCode is string && d.inviteCode.matches('^[A-Z2-9]{12}$')
+    && title(d.timezone,80) && d.createdAt is timestamp;
+  }
+  function validMember(d) {
+   return d.keys().hasOnly(['name','color','role','status','requestedRole','joinedAt','joinCode'])
+    && title(d.name,50) && color(d.color) && d.role in ['adult','child']
+    && d.status in ['active','pending'] && d.requestedRole in ['adult','child']
+    && d.joinCode is string && d.joinedAt is timestamp;
+  }
+  function invited(fid,code) {
+   return code is string && code.matches('^[A-Z2-9]{12}$')
+    && get(/databases/$(database)/documents/invites/$(code)).data.familyId == fid
+    && get(/databases/$(database)/documents/families/$(fid)).data.inviteCode == code;
+  }
+  function profileLink(uid,fid) {
+   return fid == null
+    || (fid is string
+     && getAfter(/databases/$(database)/documents/families/$(fid)/members/$(uid)).data.status in ['active','pending']);
+  }
+  function ownOrAdult(fid) {
+   return adult(fid) || (member(fid) && resource.data.createdBy == request.auth.uid);
+  }
+  function stableOwner() {
+   return request.resource.data.createdBy == resource.data.createdBy
+    && request.resource.data.createdAt == resource.data.createdAt;
+  }
+  function validEvent(d) {
+   return d.keys().hasOnly(['title','category','startDate','endDate','startTime','endTime','allDay',
+    'participants','location','description','recurrence','excludedDates','reminder','createdBy','createdAt','updatedAt'])
+    && title(d.title,120) && d.category in ['Family','School','Work','Activities','Health','Other']
+    && date(d.startDate) && date(d.endDate) && d.endDate >= d.startDate
+    && d.startTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+    && d.endTime.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')
+    && d.allDay is bool && d.participants is list && d.participants.size() <= 50
+    && d.location is string && d.location.size() <= 200
+    && d.description is string && d.description.size() <= 3000
+    && d.recurrence is map && d.recurrence.keys().hasOnly(['freq','interval','weekdays','until'])
+    && d.recurrence.freq in ['none','daily','weekly','monthly','yearly']
+    && d.recurrence.interval is int && d.recurrence.interval >= 1 && d.recurrence.interval <= 99
+    && d.recurrence.weekdays is list && d.recurrence.weekdays.size() <= 7
+    && d.recurrence.weekdays.hasOnly([0,1,2,3,4,5,6])
+    && (d.recurrence.until == '' || date(d.recurrence.until))
+    && d.excludedDates is list && d.excludedDates.size() <= 1000
+    && d.reminder in [0,10,30,60,1440] && d.createdBy is string
+    && d.createdAt is timestamp && d.updatedAt is timestamp;
+  }
+  function validTask(d) {
+   return d.keys().hasOnly(['title','assignee','dueDate','done','priority','createdBy','createdAt','updatedAt'])
+    && title(d.title,150) && d.assignee is string && (d.dueDate == '' || date(d.dueDate))
+    && d.done is bool && d.priority in ['normal','high']
+    && d.createdBy is string && d.createdAt is timestamp && d.updatedAt is timestamp;
+  }
+  function validItem(d) {
+   return d.keys().hasOnly(['text','quantity','section','checked','createdBy','createdAt','updatedAt'])
+    && title(d.text,100) && d.quantity is string && d.quantity.size() <= 40
+    && d.section in ['Produce','Dairy & eggs','Pantry','Household','Other']
+    && d.checked is bool && d.createdBy is string && d.createdAt is timestamp && d.updatedAt is timestamp;
+  }
+  function validNote(d) {
+   return d.keys().hasOnly(['text','pinned','color','createdBy','createdAt','updatedAt'])
+    && title(d.text,2000) && d.pinned is bool && d.color in ['sand','sage','lavender','peach']
+    && d.createdBy is string && d.createdAt is timestamp && d.updatedAt is timestamp;
+  }
+  match /users/{uid} {
+   allow read: if mine(uid);
+   allow create: if mine(uid) && validProfile(request.resource.data)
+    && profileLink(uid,request.resource.data.familyId);
+   // Preserve untouched fields from older app versions. Only these four
+   // canonical fields can change; legacy fields do not grant family access.
+   allow update: if mine(uid) && validProfileData(request.resource.data)
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','familyId','createdAt','birthDate'])
+    && (request.resource.data.createdAt == resource.data.get('createdAt',null)
+     || (!(resource.data.get('createdAt',null) is timestamp)
+      && request.resource.data.createdAt == request.time))
+    && (request.resource.data.familyId == resource.data.get('familyId',null)
+     || profileLink(uid,request.resource.data.familyId));
+  }
+  match /invites/{code} {
+   allow get: if signed();
+   allow list: if false;
+   allow create: if signed() && code.matches('^[A-Z2-9]{12}$')
+    && request.resource.data.keys().hasOnly(['familyId','familyName'])
+    && request.resource.data.familyId is string
+    && title(request.resource.data.familyName,60)
+    && getAfter(/databases/$(database)/documents/families/$(request.resource.data.familyId)).data.inviteCode == code
+    && getAfter(/databases/$(database)/documents/families/$(request.resource.data.familyId)).data.name == request.resource.data.familyName
+    && adultAfter(request.resource.data.familyId);
+   allow update: if false;
+   allow delete: if adult(resource.data.familyId);
+  }
+  match /families/{fid} {
+   allow read: if member(fid);
+   allow create: if signed() && validFamily(request.resource.data)
+    && request.resource.data.ownerId == request.auth.uid
+    && request.resource.data.createdAt == request.time
+    && getAfter(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid)).data.role == 'adult'
+    && getAfter(/databases/$(database)/documents/families/$(fid)/members/$(request.auth.uid)).data.status == 'active'
+    && getAfter(/databases/$(database)/documents/users/$(request.auth.uid)).data.familyId == fid
+    && getAfter(/databases/$(database)/documents/invites/$(request.resource.data.inviteCode)).data.familyId == fid;
+   allow update: if adult(fid) && validFamily(request.resource.data)
+    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','timezone','inviteCode']);
+   match /members/{uid} {
+    allow get: if mine(uid) || member(fid);
+    allow list: if member(fid);
+    allow create: if mine(uid) && validMember(request.resource.data)
+     && getAfter(/databases/$(database)/documents/users/$(uid)).data.familyId == fid
+     && (
+      (newOwner(fid,uid) && ageRole(uid) == 'adult'
+       && request.resource.data.role == 'adult' && request.resource.data.status == 'active'
+       && request.resource.data.requestedRole == 'adult'
+       && request.resource.data.joinCode == getAfter(/databases/$(database)/documents/families/$(fid)).data.inviteCode)
+      || (invited(fid,request.resource.data.joinCode)
+       && request.resource.data.role == ageRole(uid)
+       && request.resource.data.requestedRole == ageRole(uid)
+       && request.resource.data.status == 'active')
+     );
+    allow update: if validMember(request.resource.data) && (
+     (mine(uid) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name','color']))
+     || (adult(fid) && uid != get(/databases/$(database)/documents/families/$(fid)).data.ownerId
+      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['role','status'])
+      && request.resource.data.status == 'active')
+    );
+    allow delete: if signed()
+     && uid != get(/databases/$(database)/documents/families/$(fid)).data.ownerId
+     && (mine(uid) || adult(fid));
+   }
+   match /events/{id} {
+    allow read: if member(fid);
+    allow create: if member(fid) && validEvent(request.resource.data)
+     && request.resource.data.createdBy == request.auth.uid;
+    allow update: if ownOrAdult(fid) && validEvent(request.resource.data) && stableOwner();
+    allow delete: if ownOrAdult(fid);
+   }
+   match /tasks/{id} {
+    allow read: if member(fid);
+    allow create: if member(fid) && validTask(request.resource.data)
+     && request.resource.data.createdBy == request.auth.uid
+     && (adult(fid) || request.resource.data.assignee in ['',request.auth.uid]);
+    allow update: if member(fid) && validTask(request.resource.data) && stableOwner()
+     && ((ownOrAdult(fid) && (adult(fid) || request.resource.data.assignee in ['',request.auth.uid]
+       || request.resource.data.assignee == resource.data.assignee))
+      || (resource.data.assignee in ['',request.auth.uid]
+       && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['done','updatedAt'])));
+    allow delete: if ownOrAdult(fid);
+   }
+   match /items/{id} {
+    allow read: if member(fid);
+    allow create: if member(fid) && validItem(request.resource.data)
+     && request.resource.data.createdBy == request.auth.uid;
+    allow update: if member(fid) && validItem(request.resource.data) && stableOwner()
+     && (ownOrAdult(fid) || request.resource.data.diff(resource.data).affectedKeys().hasOnly(['checked','updatedAt']));
+    allow delete: if ownOrAdult(fid);
+   }
+   match /notes/{id} {
+    allow read: if member(fid);
+    allow create: if member(fid) && validNote(request.resource.data)
+     && request.resource.data.createdBy == request.auth.uid && (adult(fid) || request.resource.data.pinned == false);
+    allow update: if ownOrAdult(fid) && validNote(request.resource.data) && stableOwner()
+     && (adult(fid) || request.resource.data.pinned == resource.data.pinned);
+    allow delete: if ownOrAdult(fid);
+   }
+  }
+ }
+}
