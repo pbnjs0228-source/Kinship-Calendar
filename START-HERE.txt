@@ -1,7 +1,16 @@
+INSTALLATION FIX v2
+Upload ALL files together to your HTTPS website, replacing existing files.
+Then close the website tab and reopen it in Chrome or Edge.
+An App available banner appears when the browser offers native installation.
+If it does not, press Install app for a live status check and Copy install status.
+The previous version suppressed the browser default install promotion and hid
+service-worker errors; this version retains promotion and reports setup failures.
+No Firestore changes are required for this installation-only update.
+
 KINSHIP — BIRTH DATES, INSTALLATION & INVITE LINKS
 
 1. Upload every website file in this ZIP to the same public HTTPS folder:
-   index.html, manifest.webmanifest, sw.js, and the complete icons folder.
+   index.html, manifest.json, sw.js, and the complete icons folder.
    Do not upload only index.html. PWA installation needs the supporting files.
 2. In Firebase project familycalendarpt, open Firestore Database > Rules.
    Replace the rules with firestore.rules from this ZIP and click Publish.
