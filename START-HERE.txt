@@ -2,4 +2,8 @@ KINSHIP UPDATE
 
 Upload index.html, manifest.json, manifest.webmanifest, sw.js, and the icons folder to your website repository. Preserve folders and keep your existing CNAME file and domain settings.
 
-Includes mobile event creation improvements and attendee colour gradients. No security rule changes are required. The unchanged firestore.rules file is included for the site owner.
+Ad-inspired styling with botanical decorations, a sidebar mini calendar, family colours and a weekly timetable. Tap an empty hour to add an event. Desktop starts in Week view; phones start in Month view.
+
+No security rule changes are required. The unchanged firestore.rules file is included for the site owner.
+
+New in this update: 10 colour palettes with light/dark modes, gentle animations and reduced-motion controls, daily highlights, an Up next preview, task count, and a current-time marker. Choose Settings > Appearance > Customise.
