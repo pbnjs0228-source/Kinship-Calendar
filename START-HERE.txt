@@ -7,3 +7,5 @@ Ad-inspired styling with botanical decorations, a sidebar mini calendar, family 
 No security rule changes are required. The unchanged firestore.rules file is included for the site owner.
 
 New in this update: 10 colour palettes with light/dark modes, gentle animations and reduced-motion controls, daily highlights, an Up next preview, task count, and a current-time marker. Choose Settings > Appearance > Customise.
+
+Tab details update: Tasks now includes progress, due/overdue filters and editable chore starters. Shopping includes aisle filters and basket progress. Notes includes pinned/by-me filters, dates and editable prompts. Family includes a seven-day plan overview, assigned task counts and profile/family shortcuts. No new rules are needed for this update.
